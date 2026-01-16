@@ -1,0 +1,72 @@
+[
+  {
+    "id": "PKG-1768553441517-4260f0",
+    "createdAt": "2026-01-16T08:50:41.518Z",
+    "status": "RECEIVED",
+    "sku": "PKG-FC-SC350-NP-300-STD",
+    "config": {
+      "lead": "STD",
+      "print": "NP",
+      "size": {
+        "basis": "internal",
+        "w": 120,
+        "d": 80,
+        "h": 40
+      },
+      "type": "FC",
+      "material": "SC350",
+      "quantity": 100
+    },
+    "notes": "",
+    "estimate": {
+      "currency": "KRW",
+      "min": 47250,
+      "max": 57751,
+      "unit": 525
+    },
+    "files": [
+      {
+        "originalName": "Dayeon-Pro_QR_Page_001.png",
+        "storedName": "1768553434570_53b2f4b7c3d43_Dayeon-Pro_QR_Page_001.png",
+        "size": 86039,
+        "mime": "image/png"
+      }
+    ],
+    "finalPrice": null
+  },
+  {
+    "id": "PKG-1768551790869-0a862f",
+    "createdAt": "2026-01-16T08:23:10.869Z",
+    "status": "RECEIVED",
+    "sku": "PKG-FC-SC350-4C-500-STD",
+    "config": {
+      "lead": "STD",
+      "print": "4C",
+      "size": {
+        "basis": "internal",
+        "w": 150,
+        "d": 100,
+        "h": 50
+      },
+      "type": "FC",
+      "material": "SC350",
+      "quantity": 500
+    },
+    "notes": "",
+    "estimate": {
+      "currency": "KRW",
+      "min": 285862,
+      "max": 349388,
+      "unit": 635
+    },
+    "files": [
+      {
+        "originalName": "Dayeon-impositon.pdf",
+        "storedName": "1768551780268_d70ba335ec8_Dayeon-impositon.pdf",
+        "size": 10302142,
+        "mime": "application/pdf"
+      }
+    ],
+    "finalPrice": null
+  }
+]
