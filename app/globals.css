@@ -24,3 +24,45 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ===== packerz: readability fix (global) ===== */
+
+/* 기본 텍스트 톤 강화 */
+:root {
+  --pk-fg: #111827;     /* 거의 black */
+  --pk-muted: #374151;  /* gray-700 */
+  --pk-muted2: #4b5563; /* gray-600 */
+}
+
+/* 흰 카드 안에서 글씨가 너무 연해지는 문제 방지 */
+.prose, main, body {
+  color: var(--pk-fg);
+}
+
+/* 제목/섹션 타이틀 */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--pk-fg);
+}
+
+/* label, 설명문(회색) 최소 가독성 보장 */
+label, small, p, span, li, dt, dd {
+  color: inherit;
+}
+
+/* 특히 Tailwind의 text-neutral-500/600 같은 "연한 회색"을 강제로 올림 */
+.text-gray-400, .text-gray-500, .text-gray-600,
+.text-neutral-400, .text-neutral-500, .text-neutral-600,
+.text-zinc-400, .text-zinc-500, .text-zinc-600 {
+  color: var(--pk-muted) !important;
+}
+
+/* placeholder도 너무 흐려서 입력이 안 보이는 느낌 방지 */
+input::placeholder, textarea::placeholder {
+  color: #9ca3af !important; /* gray-400 */
+  opacity: 1 !important;
+}
+
+/* input 자체 텍스트는 진하게 */
+input, textarea, select {
+  color: var(--pk-fg);
+}

@@ -1,94 +1,334 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { UI, button, cn } from "@/src/ui-rules";
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { PackageConfig } from '@/types/package';
-import { buildPackageSku } from '@/lib/sku/packageSku';
-import { estimatePackagePrice, formatKRW } from '@/lib/pricing/packagePricing';
-import { clearDraft } from '@/lib/draft/packageDraft';
 
-type Uploaded = { originalName: string; storedName: string; size: number; mime: string };
+type TaxDocType = 'none' | 'tax_invoice' | 'cash_receipt';
+type CashReceiptType = 'personal' | 'business';
+
+function isEmail(v: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+}
+
+function isBizNo(v: string) {
+  // 사업자등록번호 10자리(숫자만) 123-45-67890 형태도 허용
+  const digits = v.replace(/[^0-9]/g, '');
+  return digits.length === 10;
+}
+
+function isPhoneKR(v: string) {
+  const digits = v.replace(/[^0-9]/g, '');
+  return digits.length >= 10 && digits.length <= 11;
+}
 
 export default function PackageReviewPage() {
   const router = useRouter();
-  const [payload, setPayload] = useState<{ draft: PackageConfig; notes: string; uploaded: Uploaded[] } | null>(null);
+
+  // 주문자 기본정보(오늘은 최소만)
+  const [buyerName, setBuyerName] = useState('');
+  const [buyerPhone, setBuyerPhone] = useState('');
+  const [buyerEmail, setBuyerEmail] = useState('');
+
+  // 세금증빙(필수)
+  const [taxDocType, setTaxDocType] = useState<TaxDocType>('none');
+
+  // 세금계산서
+  const [tiBizNo, setTiBizNo] = useState('');
+  const [tiCompany, setTiCompany] = useState('');
+  const [tiCeoName, setTiCeoName] = useState('');
+  const [tiEmail, setTiEmail] = useState('');
+  const [tiAddress, setTiAddress] = useState('');
+
+  // 현금영수증
+  const [crType, setCrType] = useState<CashReceiptType>('personal');
+  const [crValue, setCrValue] = useState(''); // personal: 휴대폰, business: 사업자번호
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    const raw = sessionStorage.getItem('pkg_review_v1');
-    if (!raw) return router.replace('/package/upload');
-    setPayload(JSON.parse(raw));
-  }, [router]);
+  const taxTitle = useMemo(() => {
+    if (taxDocType === 'none') return '발행 안함';
+    if (taxDocType === 'tax_invoice') return '세금계산서';
+    return '현금영수증';
+  }, [taxDocType]);
 
-  const sku = useMemo(() => (payload ? buildPackageSku(payload.draft) : null), [payload]);
-  const estimate = useMemo(() => (payload ? estimatePackagePrice(payload.draft) : null), [payload]);
+  function validate() {
+    const e: Record<string, string> = {};
 
-  async function submit() {
-    if (!payload) return;
+    if (!buyerName.trim()) e.buyerName = '주문자 이름을 입력해주세요.';
+    if (!buyerPhone.trim() || !isPhoneKR(buyerPhone)) e.buyerPhone = '휴대폰 번호를 확인해주세요.';
+    if (!buyerEmail.trim() || !isEmail(buyerEmail)) e.buyerEmail = '이메일을 확인해주세요.';
+
+    // 타입별 필수 입력 검증
+    if (taxDocType === 'tax_invoice') {
+      if (!isBizNo(tiBizNo)) e.tiBizNo = '사업자등록번호(10자리)를 입력해주세요.';
+      if (!tiCompany.trim()) e.tiCompany = '상호를 입력해주세요.';
+      if (!tiCeoName.trim()) e.tiCeoName = '대표자명을 입력해주세요.';
+      if (!tiEmail.trim() || !isEmail(tiEmail)) e.tiEmail = '세금계산서 수신 이메일을 확인해주세요.';
+      if (!tiAddress.trim()) e.tiAddress = '사업장 주소를 입력해주세요.';
+    }
+
+    if (taxDocType === 'cash_receipt') {
+      if (crType === 'personal') {
+        if (!crValue.trim() || !isPhoneKR(crValue)) e.crValue = '현금영수증용 휴대폰 번호를 입력해주세요.';
+      } else {
+        if (!isBizNo(crValue)) e.crValue = '현금영수증용 사업자등록번호(10자리)를 입력해주세요.';
+      }
+    }
+
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  // ✅ 여기만 “draft 저장 → /pay 이동”으로 교체됨
+  async function onNext() {
+    if (busy) return;
+    if (!validate()) return;
+
     setBusy(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sku, config: payload.draft, notes: payload.notes, estimate, files: payload.uploaded }),
-      });
-      if (!res.ok) throw new Error('create order failed');
-      const data = await res.json();
+      const payload = {
+        buyer: { name: buyerName.trim(), phone: buyerPhone.trim(), email: buyerEmail.trim() },
+        tax: {
+          type: taxDocType,
+          title: taxTitle,
+          taxInvoice:
+            taxDocType === 'tax_invoice'
+              ? {
+                  bizNo: tiBizNo.trim(),
+                  company: tiCompany.trim(),
+                  ceoName: tiCeoName.trim(),
+                  email: tiEmail.trim(),
+                  address: tiAddress.trim(),
+                }
+              : null,
+          cashReceipt:
+            taxDocType === 'cash_receipt'
+              ? {
+                  type: crType,
+                  value: crValue.trim(),
+                }
+              : null,
+        },
+      };
 
-      sessionStorage.removeItem('pkg_review_v1');
-      clearDraft();
-      router.push(`/order/complete?id=${encodeURIComponent(data.order.id)}`);
+      const res = await fetch('/api/orders/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.id) {
+        throw new Error(data?.message || 'draft save failed');
+      }
+
+      router.push(`/pay?id=${encodeURIComponent(data.id)}`);
+    } catch (e: any) {
+      alert(e?.message ?? '임시 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setBusy(false);
     }
   }
 
-  if (!payload) return null;
-
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="text-xl font-semibold">최종 확인</h1>
-      <p className="mt-1 text-sm text-gray-600">검수 후 확정 견적을 안내드립니다.</p>
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="text-2xl font-semibold">주문 정보</h1>
+      <p className="mt-2 text-sm text-neutral-600">
+        비회원 주문입니다. 결제 완료 후 이메일/휴대폰으로 주문 조회가 가능합니다.
+      </p>
 
-      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="text-sm font-semibold">SKU</div>
-        <div className="mt-1 font-mono text-sm">{sku ?? '—'}</div>
+      {/* 주문자 */}
+      <section className="mt-8 rounded-2xl border bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-semibold">주문자 정보</h2>
 
-        <div className="mt-5 rounded-xl bg-gray-50 p-4">
-          <div className="text-xs text-gray-600">예상 제작 비용</div>
-          <div className="mt-1 text-lg font-semibold">
-            {estimate ? `₩ ${formatKRW(estimate.min)} ~ ${formatKRW(estimate.max)}` : '—'}
-          </div>
-          <div className="mt-2 text-xs text-gray-600">※ 도면/사양 검수 후 확정됩니다.</div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">이름</span>
+            <input
+              className="h-11 rounded-xl border px-3"
+              value={buyerName}
+              onChange={(e) => setBuyerName(e.target.value)}
+              placeholder="예: 박문웅"
+            />
+            {errors.buyerName && <span className="text-xs text-red-600">{errors.buyerName}</span>}
+          </label>
+
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">휴대폰</span>
+            <input
+              className="h-11 rounded-xl border px-3"
+              value={buyerPhone}
+              onChange={(e) => setBuyerPhone(e.target.value)}
+              placeholder="예: 010-1234-5678"
+            />
+            {errors.buyerPhone && <span className="text-xs text-red-600">{errors.buyerPhone}</span>}
+          </label>
+
+          <label className="grid gap-1 sm:col-span-2">
+            <span className="text-sm font-medium">이메일</span>
+            <input
+              className="h-11 rounded-xl border px-3"
+              value={buyerEmail}
+              onChange={(e) => setBuyerEmail(e.target.value)}
+              placeholder="예: ochooma@gmail.com"
+            />
+            {errors.buyerEmail && <span className="text-xs text-red-600">{errors.buyerEmail}</span>}
+          </label>
+        </div>
+      </section>
+
+      {/* 세금증빙 */}
+      <section className="mt-6 rounded-2xl border bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-semibold">세금 증빙 (필수 선택)</h2>
+        <p className="mt-1 text-sm text-neutral-600">결제 단계에서 선택한 증빙으로 발행됩니다.</p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <button
+            type="button"
+            className={`h-12 rounded-2xl border px-4 text-sm font-medium ${
+              taxDocType === 'none' ? 'border-black' : 'border-neutral-200'
+            }`}
+            onClick={() => setTaxDocType('none')}
+          >
+            발행 안함
+          </button>
+
+          <button
+            type="button"
+            className={`h-12 rounded-2xl border px-4 text-sm font-medium ${
+              taxDocType === 'tax_invoice' ? 'border-black' : 'border-neutral-200'
+            }`}
+            onClick={() => setTaxDocType('tax_invoice')}
+          >
+            세금계산서
+          </button>
+
+          <button
+            type="button"
+            className={`h-12 rounded-2xl border px-4 text-sm font-medium ${
+              taxDocType === 'cash_receipt' ? 'border-black' : 'border-neutral-200'
+            }`}
+            onClick={() => setTaxDocType('cash_receipt')}
+          >
+            현금영수증
+          </button>
         </div>
 
-        <div className="mt-6">
-          <div className="text-sm font-semibold">업로드 파일</div>
-          <ul className="mt-2 space-y-2 text-sm">
-            {payload.uploaded.map((f, i) => (
-              <li key={i} className="rounded-xl border border-gray-200 px-3 py-2">{f.originalName}</li>
-            ))}
-          </ul>
-        </div>
+        {/* 세금계산서 폼 */}
+        {taxDocType === 'tax_invoice' && (
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">사업자등록번호</span>
+              <input
+                className="h-11 rounded-xl border px-3"
+                value={tiBizNo}
+                onChange={(e) => setTiBizNo(e.target.value)}
+                placeholder="예: 123-45-67890"
+              />
+              {errors.tiBizNo && <span className="text-xs text-red-600">{errors.tiBizNo}</span>}
+            </label>
 
-        {payload.notes && (
-          <div className="mt-6">
-            <div className="text-sm font-semibold">요청사항</div>
-            <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">{payload.notes}</div>
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">상호</span>
+              <input
+                className="h-11 rounded-xl border px-3"
+                value={tiCompany}
+                onChange={(e) => setTiCompany(e.target.value)}
+                placeholder="예: 피케이씨컴퍼니"
+              />
+              {errors.tiCompany && <span className="text-xs text-red-600">{errors.tiCompany}</span>}
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">대표자명</span>
+              <input
+                className="h-11 rounded-xl border px-3"
+                value={tiCeoName}
+                onChange={(e) => setTiCeoName(e.target.value)}
+                placeholder="예: 박문웅"
+              />
+              {errors.tiCeoName && <span className="text-xs text-red-600">{errors.tiCeoName}</span>}
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">수신 이메일</span>
+              <input
+                className="h-11 rounded-xl border px-3"
+                value={tiEmail}
+                onChange={(e) => setTiEmail(e.target.value)}
+                placeholder="예: accounting@company.com"
+              />
+              {errors.tiEmail && <span className="text-xs text-red-600">{errors.tiEmail}</span>}
+            </label>
+
+            <label className="grid gap-1 sm:col-span-2">
+              <span className="text-sm font-medium">사업장 주소</span>
+              <input
+                className="h-11 rounded-xl border px-3"
+                value={tiAddress}
+                onChange={(e) => setTiAddress(e.target.value)}
+                placeholder="예: 서울시 …"
+              />
+              {errors.tiAddress && <span className="text-xs text-red-600">{errors.tiAddress}</span>}
+            </label>
           </div>
         )}
 
-        <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
-          <button onClick={() => router.back()} className="rounded-xl border border-gray-200 px-4 py-2 text-sm">이전</button>
-          <button
-            disabled={busy}
-            onClick={submit}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
-          >
-            {busy ? '생성 중…' : '주문/견적 요청하기'}
-          </button>
-        </div>
+        {/* 현금영수증 폼 */}
+        {taxDocType === 'cash_receipt' && (
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">발행 유형</span>
+              <select
+                className="h-11 rounded-xl border px-3"
+                value={crType}
+                onChange={(e) => setCrType(e.target.value as CashReceiptType)}
+              >
+                <option value="personal">개인(휴대폰)</option>
+                <option value="business">사업자(사업자번호)</option>
+              </select>
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">{crType === 'personal' ? '휴대폰 번호' : '사업자등록번호'}</span>
+              <input
+                className="h-11 rounded-xl border px-3"
+                value={crValue}
+                onChange={(e) => setCrValue(e.target.value)}
+                placeholder={crType === 'personal' ? '예: 010-1234-5678' : '예: 123-45-67890'}
+              />
+              {errors.crValue && <span className="text-xs text-red-600">{errors.crValue}</span>}
+            </label>
+          </div>
+        )}
+      </section>
+
+      {/* 하단 버튼 */}
+      <div className="mt-8 flex items-center justify-end gap-3">
+        <button
+          type="button"
+          className="h-11 rounded-2xl border px-4 text-sm font-medium"
+          onClick={() => router.back()}
+          disabled={busy}
+        >
+          이전
+        </button>
+
+        <button
+          type="button"
+          className="h-11 rounded-2xl bg-black px-5 text-sm font-semibold text-white disabled:opacity-60"
+          onClick={onNext}
+          disabled={busy}
+        >
+          {busy ? '저장 중…' : '결제 단계로'}
+        </button>
       </div>
+
+      <p className="mt-3 text-xs text-neutral-500">
+        * 오늘은 화면/검증 + draft 저장 + 결제 단계 이동까지 연결합니다.
+      </p>
     </div>
   );
 }
