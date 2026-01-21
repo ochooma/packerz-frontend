@@ -25,6 +25,7 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+<<<<<<< HEAD
 /* ===== packerz: readability fix (global) ===== */
 
 /* 기본 텍스트 톤 강화 */
@@ -65,4 +66,35 @@ input::placeholder, textarea::placeholder {
 /* input 자체 텍스트는 진하게 */
 input, textarea, select {
   color: var(--pk-fg);
+=======
+@layer base {
+  /* 기본 텍스트 컬러(전체) */
+  html { color: rgb(17 24 39); } /* gray-900 */
+
+  /* 흰 카드(bg-white) 안의 글씨는 확실히 진하게 */
+  .bg-white { color: rgb(17 24 39); } /* gray-900 */
+
+  /* 카드 안 설명문(회색)이 너무 흐려지는 것 방지 */
+  .bg-white .text-neutral-600,
+  .bg-white .text-gray-600,
+  .bg-white .text-zinc-600 {
+    color: rgb(55 65 81) !important; /* gray-700 */
+  }
+
+  /* 카드 안 제목/라벨이 흐려지지 않게 */
+  .bg-white h1,
+  .bg-white h2,
+  .bg-white h3,
+  .bg-white label,
+  .bg-white span {
+    color: rgb(17 24 39);
+  }
+
+  /* placeholder가 너무 안 보이면 약간 진하게 */
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(156 163 175); /* gray-400 */
+    opacity: 1;
+  }
+>>>>>>> a504d22 (wip: local ui tweaks before pull)
 }
