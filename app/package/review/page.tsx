@@ -159,6 +159,7 @@ export default function PackageReviewPage() {
   const [crValue, setCrValue] = useState('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
 
   const taxTitle = useMemo(() => {
     if (taxDocType === 'none') return '발행 안함';
@@ -194,6 +195,7 @@ export default function PackageReviewPage() {
     return Object.keys(e).length === 0;
   }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -339,15 +341,33 @@ export default function PackageReviewPage() {
 =======
   function onNext() {
     if (!validate()) return;
+=======
+  async function onNext() {
+  if (busy) return;
+  if (!validate()) return;
+>>>>>>> 34aa409 (fix: move draft API route to correct Next.js app router path)
 
+  setBusy(true);
+
+  try {
     const payload = {
-      buyer: { name: buyerName.trim(), phone: buyerPhone.trim(), email: buyerEmail.trim() },
+      buyer: {
+        name: buyerName.trim(),
+        phone: buyerPhone.trim(),
+        email: buyerEmail.trim(),
+      },
       tax: {
         type: taxDocType,
         title: taxTitle,
         taxInvoice:
           taxDocType === 'tax_invoice'
-            ? { bizNo: tiBizNo.trim(), company: tiCompany.trim(), ceoName: tiCeoName.trim(), email: tiEmail.trim(), address: tiAddress.trim() }
+            ? {
+                bizNo: tiBizNo.trim(),
+                company: tiCompany.trim(),
+                ceoName: tiCeoName.trim(),
+                email: tiEmail.trim(),
+                address: tiAddress.trim(),
+              }
             : null,
         cashReceipt:
           taxDocType === 'cash_receipt'
@@ -356,9 +376,29 @@ export default function PackageReviewPage() {
       },
     };
 
-    console.log('[review payload]', payload);
-    router.push('/pay'); // Day 2~3
+    const res = await fetch('/api/orders/draft', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`draft api failed: ${text}`);
+    }
+
+    const data = await res.json();
+    if (!data?.id) {
+      throw new Error('draft api response missing id');
+    }
+
+    router.push(`/pay?draftId=${encodeURIComponent(data.id)}`);
+  } catch (e: any) {
+    alert(e?.message ?? '임시 주문 저장에 실패했습니다.');
+  } finally {
+    setBusy(false);
   }
+}
 
   const choiceBtn = (active: boolean) =>
     cn(UI.choice, 'text-slate-900', active && 'border-slate-900 ring-2 ring-slate-300');
@@ -380,7 +420,7 @@ export default function PackageReviewPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-1">
                 <span className={UI.label}>이름</span>
-                <input className={UI.input} value={buyerName} onChange={(e) => setBuyerName(e.target.value)} placeholder="예: 박문웅" />
+                <input className={UI.input} value={buyerName} onChange={(e) => setBuyerName(e.target.value)} placeholder="예: 김문선" />
                 {errors.buyerName && <span className={UI.danger}>{errors.buyerName}</span>}
               </label>
 
@@ -392,7 +432,7 @@ export default function PackageReviewPage() {
 
               <label className="grid gap-1 sm:col-span-2">
                 <span className={UI.label}>이메일</span>
-                <input className={UI.input} value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} placeholder="예: ochooma@gmail.com" />
+                <input className={UI.input} value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} placeholder="예: cs@packerz.co.kr" />
                 {errors.buyerEmail && <span className={UI.danger}>{errors.buyerEmail}</span>}
               </label>
             </div>
