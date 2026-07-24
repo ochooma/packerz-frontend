@@ -1,9 +1,11 @@
 # Packerz Production Architecture
 
-**Status:** Draft production baseline  
-**Scope:** MVP custom unprinted packaging  
-**Infrastructure target:** AWS EC2 `t3.small`  
-**Primary domains:** `packerz.co.kr`, `api.packerz.co.kr`, `admin.packerz.co.kr`  
+**Status:** Cross-checked draft production baseline
+**Reviewed:** 2026-07-24 against `PRD.md`, `IA.md`, `USER_FLOW.md`,
+`SCREENS.md`, `DATABASE.md`, `API.md`, `BOX_ENGINE.md`, and `ADMIN.md`
+**Scope:** MVP custom unprinted packaging
+**Infrastructure target:** AWS EC2 `t3.small`
+**Primary domains:** `packerz.co.kr`, `api.packerz.co.kr`, `admin.packerz.co.kr`
 **Sources:** All documents in `/docs`
 
 ## 1. Executive Summary
@@ -19,7 +21,8 @@ The MVP supports:
 - Customer dimensions and material selection
 - Manufacturability validation
 - Automatic dieline generation
-- SVG, PDF, and DXF export
+- SVG and PDF export as the sellable-MVP requirement
+- DXF as a gated follow-on capability after machine compatibility is approved
 - Cart, checkout, payment, production, QC, and shipping
 
 The production baseline is a deliberately small architecture:
@@ -59,7 +62,8 @@ This decision clarifies the earlier API draft, which described Next.js as the pu
 1. Keep customer, admin, and API concerns clearly separated by domain.
 2. Maintain one authoritative transaction owner for MySQL business state.
 3. Prevent invalid dielines from reaching cart, payment, or production.
-4. Generate SVG, PDF, and DXF from one canonical geometry.
+4. Generate SVG and PDF from one canonical geometry; preserve an additive path
+   to DXF from that same geometry.
 5. Support registered customers and guest checkout safely.
 6. Keep the single EC2 deployment operable within `t3.small` constraints.
 7. Preserve a clear path from single-host MVP to horizontally scalable services.
@@ -160,7 +164,8 @@ Responsibilities:
 - Material selection and fixed glue-method display
 - Validation/quote presentation
 - Dieline preview
-- SVG/PDF/DXF download initiation
+- SVG/PDF customer download initiation
+- Authorized internal DXF download initiation only after the DXF gate is passed
 - Cart and Buy Now presentation
 - Checkout and payment-provider launch
 - Order confirmation and customer tracking
@@ -282,7 +287,10 @@ Responsibilities:
 - Validate topology and manufacturing constraints.
 - Create deterministic canonical geometry.
 - Calculate a geometry hash.
-- Generate SVG, PDF, DXF, preview, and manifest.
+- Generate canonical geometry, SVG, PDF, preview, and manifest for the sellable
+  MVP.
+- Generate DXF from the same canonical geometry only when the DXF capability is
+  enabled for an approved machine profile.
 - Upload immutable outputs to S3.
 - Submit checksums/manifest to the PHP internal API.
 
@@ -295,15 +303,15 @@ The Box Engine:
 - Does not trust customer-supplied geometry.
 - Must produce the same hash for the same normalized/versioned inputs.
 
-### 5.5 SVG/PDF/DXF generation
+### 5.5 SVG/PDF-first generation and optional DXF
 
 All exports originate from the same canonical geometry:
 
 ```text
 Canonical fixed-point geometry
-├── SVG exporter
-├── PDF exporter
-└── DXF exporter
+├── SVG exporter                  required for sellable MVP
+├── PDF exporter                  required for sellable MVP
+└── DXF exporter                  gated follow-on capability
 ```
 
 Requirements:
@@ -312,7 +320,8 @@ Requirements:
 - Stable `CUT`, `SCORE`, `DIMENSION`, and `ANNOTATION` semantics
 - Vector output
 - PDF at physical 1:1 scale
-- DXF version/layers validated against actual CNC/CAD software
+- DXF version/layers validated against actual CNC/CAD software before enabling
+  the DXF capability
 - Per-format checksum
 - Exporter version recorded
 - Cross-format bounds verified against canonical geometry
@@ -320,14 +329,22 @@ Requirements:
 - No PDF executable content
 - Restricted DXF entity types
 
-DXF is newer than the original SVG/PDF-only PRD. Architecture supports DXF, but database and API contracts must be migrated and approved before implementation.
+SVG and PDF define `generated` for the initial sellable MVP. A DXF failure must
+not block a valid SVG/PDF purchase while DXF remains disabled. Once DXF becomes
+a required production artifact for an approved machine profile, readiness is
+profile-specific and the DXF must pass physical import/cut tests.
+
+DXF is newer than the original SVG/PDF-only PRD. The architecture preserves DXF
+as an additive capability, but database/API migrations and actual machine
+compatibility approval are required before it is enabled.
 
 ### 5.6 S3 file storage
 
 Responsibilities:
 
 - Canonical geometry JSON
-- SVG/PDF/DXF exports
+- SVG/PDF exports
+- Optional DXF exports after the capability gate
 - Dieline preview images
 - Output manifests
 - Approved customer reference/support attachments
@@ -419,7 +436,7 @@ Exception states:
 
 Machines and Statistics are new domains relative to the current database/API drafts. They require approved schemas and contracts before implementation.
 
-### 5.9 CNC export workflow
+### 5.9 CNC preparation workflow
 
 The MVP is a controlled download/import workflow. Packerz does not connect directly to CNC equipment.
 
@@ -428,16 +445,20 @@ Responsibilities:
 1. Production manager opens an approved production job.
 2. The system verifies the immutable order-item specification and dieline hash.
 3. A compatible machine profile is selected.
-4. The Box Engine verifies or regenerates the machine-specific DXF revision.
-5. PHP authorizes a short-lived DXF download.
-6. Operator downloads the DXF from private S3/CloudFront.
-7. Operator imports it into approved CAD/CAM/CNC software.
+4. The system determines whether the approved machine workflow uses:
+   - a profile-bound Packerz DXF after the DXF capability gate; or
+   - an operator-created CAM/CNC job derived from the approved SVG/PDF during
+     the initial manual workflow.
+5. PHP authorizes short-lived access to the approved source artifact.
+6. Operator downloads the artifact from private S3/CloudFront.
+7. Operator imports or prepares it in approved CAD/CAM/CNC software.
 8. Operator verifies:
    - Units are millimeters.
    - `CUT` and `SCORE` layers map correctly.
    - Reference dimension is correct.
    - Sheet bounds fit the machine.
-9. Packerz records operator, machine, geometry hash, exporter version, and export time.
+9. Packerz records operator, machine, geometry hash, source/exporter version,
+   prepared CNC-job reference/checksum, and preparation time.
 10. Production starts only after the operator’s verification.
 
 Direct machine push, remote start, and machine telemetry control are future capabilities.
@@ -481,7 +502,8 @@ Rules:
 | Catalog/rules | MySQL | API and Box Engine |
 | Box specification | Versioned MySQL box row | Quote, dieline, order |
 | Canonical geometry | Immutable S3 object + MySQL hash/metadata | Exporters/production |
-| SVG/PDF/DXF | Immutable S3 objects + MySQL checksums | Customer/admin/CNC |
+| SVG/PDF | Immutable S3 objects + MySQL checksums | Customer/admin/production |
+| DXF, when enabled | Immutable S3 object + MySQL checksum/profile metadata | Authorized production/CNC operators |
 | Price/order totals | PHP-calculated MySQL snapshots | Checkout/payment |
 | Payment result | Verified provider event + MySQL | Order/production |
 | Production/QC/shipping | MySQL append-only state/history | Admin/customer tracking |
@@ -556,7 +578,7 @@ flowchart TB
     Backup --> S3
 ```
 
-## 9. Request Flow
+## 9. Customer and Admin Request Flow
 
 ### 9.1 Customer page and API request
 
@@ -607,6 +629,79 @@ sequenceDiagram
     PHP-->>Staff: Admin HTML/JSON
 ```
 
+### 9.3 Guest checkout flow
+
+Guest checkout uses a pseudonymous guest identity for box, cart, checkout, and
+order ownership. The browser never invents an owner ID, and a successful payment
+redirect never grants order access by itself.
+
+```mermaid
+sequenceDiagram
+    actor Guest as Guest Customer
+    participant Web as Next.js
+    participant API as PHP API
+    participant DB as MySQL
+    participant PG as Payment Provider
+
+    Guest->>Web: Start a box without signing in
+    Web->>API: POST /api/v1/guests/sessions
+    API->>DB: Create guest and hashed/revocable session record
+    API-->>Guest: Secure HttpOnly guest credential
+    Guest->>API: Create box, dieline, quote, and cart
+    API->>DB: Persist every resource with guest ownership
+    Guest->>API: Create checkout and submit contact/address/consent
+    API->>DB: Revalidate and snapshot checkout data
+    Guest->>API: Create pending order idempotently
+    API->>DB: Lock resources and create immutable order snapshots
+    Guest->>API: Create payment attempt
+    API->>PG: Server amount and provider request
+    PG->>API: Signed webhook
+    API->>DB: Verify and commit payment + production job once
+    API-->>Guest: Authoritative order/payment status
+
+    Note over Guest,API: Later lookup requires order number plus verified contact/OTP
+    Guest->>API: POST /api/v1/orders/lookup
+    API-->>Guest: Short-lived JWT scoped to exactly one order
+```
+
+Guest invariants:
+
+- guest, customer, and order-scoped JWT audiences are distinct;
+- one resource has exactly one owner at a time;
+- guest-to-customer conversion is transactional and audited;
+- order lookup responses resist enumeration;
+- order access survives guest-session expiry only through verified order lookup;
+- raw guest and order-lookup tokens are never stored.
+
+### 9.4 Box configuration flow
+
+```mermaid
+flowchart TD
+    Start["Customer chooses sample, mockup, or low-volume"] --> Dimensions["Enter dimension basis and three dimensions"]
+    Dimensions --> Material["Select an active material"]
+    Material --> Glue["Display one fixed, read-only glue method"]
+    Glue --> Quantity["Choose supported quantity"]
+    Quantity --> Resolve["PHP reloads template, thickness, glue, and rule versions"]
+    Resolve --> Validate["Box Engine/server validates manufacturability"]
+    Validate --> Valid{"Valid?"}
+    Valid -- "No" --> Issues["Return field and manufacturing issues"]
+    Issues --> Dimensions
+    Valid -- "Yes" --> Quote["Create expiring server quote"]
+    Quote --> Generate["Generate canonical geometry + SVG/PDF"]
+    Generate --> Output{"Required exports valid?"}
+    Output -- "No" --> Failed["Generation failed; cart and checkout blocked"]
+    Output -- "Yes" --> Review["Preview exact geometry revision"]
+    Review --> Decision{"Customer decision"}
+    Decision -- "Edit" --> Revision["Create a new box revision"]
+    Revision --> Validate
+    Decision -- "Approve" --> Approved["Bind approval to geometry hash"]
+    Approved --> Cart["Cart or Buy Now"]
+```
+
+The three dimension labels remain a documented decision: most commerce documents
+use Width × Depth × Height, while `BOX_ENGINE.md` uses Length × Width × Height.
+No implementation may silently map these fields.
+
 ## 10. Order Flow
 
 ```mermaid
@@ -618,7 +713,7 @@ flowchart TD
     E --> B
     D -- "Yes" --> F["Generate quote"]
     F --> G["Queue dieline generation"]
-    G --> H["Box Engine generates canonical geometry + SVG/PDF/DXF"]
+    G --> H["Box Engine generates canonical geometry + required SVG/PDF"]
     H --> I{"Exports valid?"}
     I -- "No" --> J["Generation failed; no purchase"]
     I -- "Yes" --> K["Customer previews and approves geometry hash"]
@@ -637,7 +732,7 @@ flowchart TD
     U -- "Yes" --> W["Mark paid exactly once"]
     W --> X["Create production job exactly once"]
     X --> Y["Production review and machine selection"]
-    Y --> Z["CNC export and production"]
+    Y --> Z["Approved CNC job preparation and production"]
     Z --> QC["Quality control"]
     QC --> QCD{"Pass?"}
     QCD -- "Rework" --> Z
@@ -646,7 +741,35 @@ flowchart TD
     SH --> DONE["Shipped → Delivered → Completed"]
 ```
 
-## 11. File Upload Flow
+## 11. File Storage and Upload Flow
+
+### 11.1 Server-generated manufacturing file storage
+
+```mermaid
+sequenceDiagram
+    participant API as PHP API
+    participant Worker as Box Engine
+    participant S3 as Private S3
+    participant DB as MySQL
+    participant Client as Authorized Browser
+
+    API->>Worker: Versioned input package + assigned immutable keys
+    Worker->>Worker: Generate canonical geometry and required exports
+    Worker->>S3: PUT immutable objects with checksums/metadata
+    Worker->>API: Return manifest, sizes, hashes, and exporter versions
+    API->>S3: HEAD/verify expected objects
+    API->>DB: Commit object keys, checksums, and generation status
+    Client->>API: Request authorized preview/download
+    API->>DB: Verify owner/order/admin scope
+    API-->>Client: Short-lived signed CloudFront/S3 URL
+    Client->>S3: Download through signed edge/object access
+```
+
+The database commit never claims that a file is available before the object and
+checksum are verified. S3 object content is immutable; a changed artifact uses
+a new revisioned key.
+
+### 11.2 Untrusted reference/support upload
 
 Packerz does not accept print artwork in the MVP.
 
@@ -709,7 +832,10 @@ sequenceDiagram
     W->>W: Normalize L × W × H
     W->>W: Calculate panels, glue flap, score and cut lines
     W->>W: Validate canonical geometry
-    W->>W: Export SVG, PDF, DXF and manifest
+    W->>W: Export required SVG, PDF, preview, and manifest
+    opt DXF capability enabled for an approved machine profile
+        W->>W: Export and validate DXF from the same geometry
+    end
     W->>S3: Upload immutable output objects
     W->>API: Complete job with hashes and manifest
     API->>S3: Verify object metadata/checksums
@@ -717,14 +843,17 @@ sequenceDiagram
 
     B->>API: GET /dielines/{dielineId}
     API-->>B: Status + export availability
-    B->>API: GET /dielines/{id}/exports/dxf
+    B->>API: GET /dielines/{id}/exports/{svg|pdf}
     API-->>B: Short-lived signed URL
     B->>CF: Download authorized immutable object
 ```
 
 Failure rules:
 
-- A partial output set is not considered complete when all three formats are required.
+- A missing/invalid SVG or PDF means the sellable-MVP dieline is not complete.
+- A DXF failure does not block customer purchase while DXF is disabled.
+- After a machine profile requires DXF, that production job is not CNC-ready
+  until its profile-bound DXF passes validation.
 - A worker crash releases the lease after a bounded timeout.
 - Idempotent retry reuses the same deterministic input identity.
 - Changed template, material thickness, rules, machine profile, or generator creates a new revision/hash.
@@ -754,26 +883,65 @@ sequenceDiagram
     API-->>B: Authoritative status
 ```
 
-## 14. CNC Export Flow
+## 14. CNC Preparation Flow
 
 ```mermaid
 flowchart TD
     A["Paid order and approved production job"] --> B["Production manager selects machine profile"]
     B --> C["Verify geometry hash and machine capability"]
-    C --> D{"Compatible DXF exists?"}
-    D -- "No" --> E["Generate new machine-specific dieline revision"]
+    C --> D{"Approved DXF capability enabled?"}
+    D -- "Yes" --> E["Generate/reuse profile-bound DXF"]
+    D -- "No" --> M0["Operator prepares CAM/CNC job from approved SVG/PDF"]
     E --> F["Cross-format and machine validation"]
-    D -- "Yes" --> F
+    M0 --> M1["Record derived job checksum, software, and operator"]
     F --> G{"Validation passed?"}
+    M1 --> G
     G -- "No" --> H["Hold job and record reason"]
-    G -- "Yes" --> I["Issue signed DXF download"]
-    I --> J["Operator imports DXF into CAD/CAM"]
+    G -- "Yes" --> I["Issue signed approved-artifact access"]
+    I --> J["Operator imports/prepares job in CAD/CAM"]
     J --> K["Verify mm units, CUT/SCORE layers, dimension reference, sheet bounds"]
     K --> L{"Operator approved?"}
     L -- "No" --> H
     L -- "Yes" --> M["Record CNC export event"]
-    M --> N["Start production"]
+    M --> N["Release to CNC cutting/scoring"]
 ```
+
+The manual SVG/PDF-to-CAM branch is acceptable only when the actual factory
+process can preserve scale, cut/score semantics, and a traceable checksum. If it
+cannot, DXF compatibility becomes a go-live dependency rather than a follow-on.
+
+### 14.1 Production job flow
+
+```mermaid
+sequenceDiagram
+    participant API as PHP API
+    participant DB as MySQL
+    actor Manager as Production Manager
+    actor Operator
+    actor Inspector as QC Inspector
+
+    API->>DB: Payment-confirmation transaction creates job once
+    Manager->>API: Review order specification and required SVG/PDF
+    API->>DB: Record approval or hold with reason
+    Manager->>API: Assign operator, machine, and schedule
+    API->>DB: Append assignment/schedule event
+    Operator->>API: Confirm material and CNC preparation
+    API->>DB: Record input versions and machine-job reference
+    Operator->>API: Start cutting/scoring
+    Operator->>API: Complete cutting, folding, and gluing stages
+    API->>DB: Persist quantities and append each audited transition
+    Inspector->>API: Submit versioned QC checklist
+    alt QC passes
+        API->>DB: Mark QC passed and ready for packing/shipping
+    else QC fails
+        API->>DB: Create rework/hold branch without rewriting failure
+    end
+```
+
+`PRODUCTION.md` defines the canonical manufacturing stage codes, required data,
+roles, queue rules, and manual/automated boundaries. Until the API and database
+are migrated, those stage codes are a proposed contract rather than implemented
+values.
 
 ## 15. Deployment Structure
 
@@ -1145,7 +1313,8 @@ This is the highest-priority structural scale change because the initial single 
 | PHP-FPM/API unavailable | Transactions blocked; frontend shows recoverable error | Restart pool, rollback PHP release, inspect MySQL/dependencies |
 | MySQL unavailable | All authoritative mutations stop | Fail closed, restore/recover database, do not use local fallback JSON |
 | Box Engine worker unavailable | Dielines stay pending; commerce blocked for those items | PM2 restart, lease timeout, idempotent retry |
-| SVG/PDF/DXF exporter failure | Dieline marked failed/partial; cannot purchase when outputs required | Fix/retry same inputs or publish new generator version |
+| SVG/PDF exporter failure | Dieline marked failed/partial; purchase blocked | Fix/retry same inputs or publish new generator version |
+| Optional DXF exporter failure | Customer purchase remains valid; affected CNC job is not ready | Use the approved manual CAM branch or hold until profile-bound DXF succeeds |
 | S3 unavailable | Upload/download/generation completion delayed | Retry with backoff; keep DB state pending |
 | Payment provider unavailable | Order stays unpaid; no production job | Recoverable retry, reconcile provider state |
 | Payment webhook delayed | UI shows pending | Poll authoritative provider/status; process webhook idempotently |
@@ -1177,7 +1346,9 @@ ALB health checks should not require payment provider or SES availability; those
 Architecture introduces or finalizes decisions that are not yet fully represented in every existing document:
 
 1. **Public API runtime:** PHP/GnuBoard is the production owner; `API.md` currently describes Next.js as the public Route Handler edge.
-2. **DXF:** `BOX_ENGINE.md` includes DXF, while the original PRD/database/API began with SVG/PDF.
+2. **DXF:** `BOX_ENGINE.md` models DXF, while the sellable-MVP baseline requires
+   SVG/PDF first. DXF remains gated unless the factory declares it necessary for
+   safe CNC preparation.
 3. **Machines:** Admin navigation and Box Engine require versioned machine profiles; `DATABASE.md` and `API.md` do not yet define machine tables/endpoints.
 4. **Statistics:** Admin navigation includes Statistics; operational metric tables/endpoints are not yet defined.
 5. **Dimension terminology:** Box Engine uses Length/Width/Height; older documents use Width/Depth/Height.
@@ -1185,6 +1356,25 @@ Architecture introduces or finalizes decisions that are not yet fully represente
 7. **File scanning:** Quarantine flow is defined, but the scanner runtime/service is not selected.
 8. **Payment provider:** Contract is generic until a provider is approved.
 9. **CNC/DXF profile:** Actual DXF version, layer mapping, and machine import behavior require physical acceptance testing.
+10. **Production states:** PRD labels, API examples, `ADMIN.md`, and the
+    unconstrained `production_jobs.status` column do not yet share one complete
+    enum/transition matrix. `PRODUCTION.md` supplies the proposed canonical
+    stage codes for approval.
+11. **Routes and resource names:** `SCREENS.md` still uses older
+    `box-projects`/`box-configurations` and admin routes, while `API.md` combines
+    those concepts under versioned `boxes` and `ADMIN.md` defines the newer
+    `/admin/...` hierarchy.
+12. **Coupons:** Database/API drafts model coupons, but PRD excludes complex
+    coupon behavior. Coupons should remain feature-disabled for the sellable
+    MVP.
+13. **Dieline approval:** Customer approval and production approval are separate
+    database concepts, but some flows say only “approved.” UI/API state must
+    identify which approval is meant.
+14. **Order timing terminology:** `API.md`/`DATABASE.md` create a commercial
+    `payment_pending` order before payment, while parts of `PRD.md` say the
+    “production order” is created after payment. The architecture interpretation
+    is: commercial order before payment; production job only after verified
+    payment.
 
 These are documentation/architecture decisions only. Application implementation must wait for Project Manager approval and synchronized API/database migrations.
 
@@ -1211,9 +1401,10 @@ These are documentation/architecture decisions only. Application implementation 
 
 - [ ] Manufacturing formulas are signed off.
 - [ ] Machine profile is modeled.
-- [ ] SVG/PDF/DXF match one geometry hash.
+- [ ] Required SVG/PDF match one geometry hash.
 - [ ] PDF is verified at 1:1 scale.
-- [ ] DXF is tested in actual CNC/CAD software.
+- [ ] Manual SVG/PDF-to-CAM preparation is physically verified, or DXF is
+      promoted to a required gate and tested in actual CNC/CAD software.
 - [ ] Physical cut/score/glue samples pass.
 
 ### Infrastructure
